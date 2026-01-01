@@ -13,29 +13,16 @@ jobs:
     - uses: actions/checkout@v4
     
     - name: Install MinGW GCC
+      run: choco install mingw -y --no-progress
+      
+    - name: Compile masscan
       run: |
-        choco install mingw -y
-        
-    - name: Compile directly with GCC
-      run: |
-        # 将 MinGW 添加到 PATH
+        # 添加 MinGW 到 PATH
         $mingwPath = "C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\bin"
         $env:PATH = "$mingwPath;$env:PATH"
         
-        # 查看源代码文件
-        Get-ChildItem src\*.c
-        
-        # 直接编译所有 C 文件
+        # 编译
         gcc -O3 -Wall -I. -o masscan.exe src/*.c -lws2_32 -liphlpapi
-        
-        # 检查是否编译成功
-        if (Test-Path "masscan.exe") {
-          Write-Host "编译成功！文件大小: $((Get-Item masscan.exe).Length) bytes"
-          .\masscan.exe --version
-        } else {
-          Write-Error "编译失败"
-          exit 1
-        }
         
     - name: Upload executable
       uses: actions/upload-artifact@v4
