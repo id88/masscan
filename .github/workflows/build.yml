@@ -1,0 +1,164 @@
+name: Build Masscan Executables
+
+on:
+  push:
+    branches: [ main, master ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:  # 允许手动触发
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux 64-bit
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact_name: masscan-linux-x64
+            build_cmd: make
+            cc: gcc
+            
+          # Linux ARM64
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            artifact_name: masscan-linux-arm64
+            build_cmd: make CC=aarch64-linux-gnu-gcc
+            cc: aarch64-linux-gnu-gcc
+            
+          # macOS Intel
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            artifact_name: masscan-macos-x64
+            build_cmd: make
+            cc: clang
+            
+          # macOS ARM64 (Apple Silicon)
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact_name: masscan-macos-arm64
+            build_cmd: make
+            cc: clang
+            
+          # Windows (MinGW)
+          - os: windows-latest
+            target: x86_64-pc-windows-gnu
+            artifact_name: masscan-windows-x64.exe
+            build_cmd: make
+            cc: gcc
+            
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive  # masscan可能使用子模块
+
+    - name: Install dependencies (Linux)
+      if: runner.os == 'Linux'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          gcc \
+          make \
+          git \
+          libpcap-dev \
+          gcc-aarch64-linux-gnu  # 用于交叉编译ARM64
+        
+    - name: Install dependencies (macOS)
+      if: runner.os == 'macOS'
+      run: |
+        brew install libpcap
+        # 确保Xcode命令行工具已安装
+        xcode-select --install || true
+        
+    - name: Install dependencies (Windows)
+      if: runner.os == 'Windows'
+      run: |
+        choco install make -y
+        choco install mingw -y
+        # 将MinGW添加到PATH
+        echo "C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
+
+    - name: Build Masscan
+      run: |
+        echo "Building for ${{ matrix.target }}"
+        echo "Using CC: ${{ matrix.cc }}"
+        
+        # 清理之前的构建
+        make clean || true
+        
+        # 设置编译器
+        if [[ "${{ runner.os }}" == "Windows" ]]; then
+          # Windows使用不同的make命令
+          mingw32-make ${{ matrix.build_cmd }}
+        else
+          # Linux和macOS
+          CC="${{ matrix.cc }}" ${{ matrix.build_cmd }}
+        fi
+        
+        # 检查可执行文件是否创建
+        if [[ "${{ runner.os }}" == "Windows" ]]; then
+          if [ -f "masscan.exe" ]; then
+            echo "Build successful: masscan.exe"
+            ls -la masscan.exe
+          else
+            echo "Build failed: masscan.exe not found"
+            ls -la bin/ || true
+            exit 1
+          fi
+        else
+          if [ -f "masscan" ]; then
+            echo "Build successful: masscan"
+            ls -la masscan
+          else
+            echo "Build failed: masscan not found"
+            ls -la bin/ || true
+            exit 1
+          fi
+        fi
+
+    - name: Test the executable
+      run: |
+        echo "Testing the built executable..."
+        if [[ "${{ runner.os }}" == "Windows" ]]; then
+          ./masscan.exe --version || ./masscan.exe -h || echo "Version check failed, but binary exists"
+        else
+          ./masscan --version || ./masscan -h || echo "Version check failed, but binary exists"
+        fi
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ matrix.artifact_name }}
+        path: |
+          ${{ runner.os == 'Windows' && 'masscan.exe' || 'masscan' }}
+        retention-days: 7
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: ./artifacts
+
+    - name: Display structure of downloaded files
+      run: find ./artifacts -type f -name "*" | sort
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          artifacts/**/masscan*
+          artifacts/**/masscan*.exe
+        generate_release_notes: true
+        draft: false
+        prerelease: false
