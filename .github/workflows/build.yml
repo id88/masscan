@@ -1,36 +1,25 @@
-name: Build Masscan for Windows
+name: Build Masscan Windows Executable
 
 on:
   push:
     branches: [ master ]
-  pull_request:
-    branches: [ master ]
-  workflow_dispatch:  # 允许手动触发
+  workflow_dispatch:
 
 jobs:
-  build-windows:
+  build:
     runs-on: windows-latest
     
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
+    - uses: actions/checkout@v4
+    
+    - name: Install MinGW and Make
+      run: choco install mingw make -y
       
-    - name: Install build tools
-      run: |
-        # 安装 MinGW (GCC 编译器) 和 make
-        choco install mingw make -y
-        
-    - name: Build Masscan
-      run: |
-        # 使用 MinGW 的 make
-        mingw32-make
-        
-    - name: Test the executable
-      run: |
-        .\masscan.exe --help
-        
-    - name: Upload Windows executable
+    - name: Compile Masscan
+      run: mingw32-make
+      
+    - name: Upload Binary
       uses: actions/upload-artifact@v4
       with:
-        name: masscan-windows
+        name: masscan-windows-exe
         path: masscan.exe
